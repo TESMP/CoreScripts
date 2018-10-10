@@ -56,7 +56,7 @@ function BaseWorld:AddRegionVisitor(pid, regionName)
     end
 
     -- Only add new visitor if we don't already have them
-    if tableHelper.containsValue(self.storedRegions[regionName].visitors, pid) == false then
+    if not tableHelper.containsValue(self.storedRegions[regionName].visitors, pid) then
         table.insert(self.storedRegions[regionName].visitors, pid)
     end
 end
@@ -109,7 +109,7 @@ end
 
 function BaseWorld:SetRegionAuthority(pid, regionName)
     self.storedRegions[regionName].authority = pid
-    tes3mp.LogMessage(1, "Authority of region " .. regionName .. " is now " ..
+    tes3mp.LogMessage(enumerations.log.INFO, "Authority of region " .. regionName .. " is now " ..
         logicHandler.GetChatName(pid))
 
     tes3mp.SetAuthorityRegion(regionName)
@@ -184,7 +184,7 @@ end
 
 function BaseWorld:LoadKills(pid)
 
-    tes3mp.InitializeKillChanges(pid)
+    tes3mp.ClearKillChanges(pid)
 
     for refId, number in pairs(self.data.kills) do
 
@@ -208,8 +208,8 @@ function BaseWorld:LoadRegionWeather(regionName, pid, sendToOthers, forceState)
         tes3mp.SetWeatherForceState(forceState)
         tes3mp.SendWorldWeather(pid, sendToOthers)
     else
-        tes3mp.LogMessage(1, "Could not load weather in region " .. regionName .. " for " ..
-            logicHandler.GetChatName(pid) .. " because we have no weather information for it")
+        tes3mp.LogMessage(enumerations.log.INFO, "Could not load weather in region " .. regionName ..
+            " for " .. logicHandler.GetChatName(pid) .. " because we have no weather information for it")
     end
 end
 

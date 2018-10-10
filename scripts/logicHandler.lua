@@ -64,7 +64,7 @@ logicHandler.CheckPlayerValidity = function(pid, targetPid)
         valid = true
     end
 
-    if valid == false then
+    if not valid then
         if sendMessage then
             local message = "That player is not logged in!\n"
             tes3mp.SendMessage(pid, message, false)
@@ -174,7 +174,7 @@ logicHandler.GetPlayerByName = function(targetName)
 end
 
 logicHandler.BanPlayer = function(pid, targetName)
-    if tableHelper.containsValue(banList.playerNames, string.lower(targetName)) == false then
+    if not tableHelper.containsValue(banList.playerNames, string.lower(targetName)) then
         local targetPlayer = logicHandler.GetPlayerByName(targetName)
 
         if targetPlayer ~= nil then
@@ -362,6 +362,25 @@ end
 
 logicHandler.CreateObjectAtLocation = function(cell, location, refId, packetType)
 
+    -- Is this a generated record? If so, add a link to it in the cell it
+    -- has been placed in
+    if logicHandler.IsGeneratedRecord(refId) then
+        local recordStore = logicHandler.GetRecordStoreByRecordId(refId)
+
+        if recordStore ~= nil then
+            LoadedCells[cell]:AddLinkToRecord(recordStore.storeType, refId, uniqueIndex)
+
+            -- Do any of the visitors to this cell lack the generated record?
+            -- If so, send it to them
+            for _, visitorPid in pairs(LoadedCells[cell].visitors) do
+                recordStore:LoadGeneratedRecords(visitorPid, recordStore.data.generatedRecords, { refId })
+            end
+        else
+            tes3mp.LogMessage(enumerations.log.ERROR, "Attempt at creating object based on non-existent generated record")
+            return
+        end
+    end
+
     local mpNum = WorldInstance:GetCurrentMpNum() + 1
     local uniqueIndex =  0 .. "-" .. mpNum
 
@@ -470,23 +489,61 @@ logicHandler.RunConsoleCommandOnObject = function(consoleCommand, cellDescriptio
     tes3mp.SendConsoleCommand(true, false)
 end
 
-logicHandler.GetRecordStore = function(recordType)
+logicHandler.IsGeneratedRecord = function(recordId)
 
-    if recordType == nil then return end
-
-    local recordStoreKey
-
-    if type(recordType) == "number" then
-        recordStoreKey = string.lower(tableHelper.getIndexByPattern(enumerations.recordType, recordType))
-    else
-        recordStoreKey = string.lower(recordType)
+    if string.find(string.lower(recordId), string.lower(config.generatedRecordIdPrefix)) ~= nil then
+        return true
     end
 
-    if recordStoreKey ~= nil then
-        return RecordStores[recordStoreKey]
+    return false
+end
+
+logicHandler.GetRecordStoreByRecordId = function(recordId)
+
+    local isGenerated = logicHandler.IsGeneratedRecord(recordId)
+    
+    if isGenerated then
+        local recordType = string.match(recordId, "_(%a+)_")
+
+        if RecordStores[recordType] ~= nil then
+            return RecordStores[recordType]
+        end
+    end
+
+    for _, storeType in pairs(config.recordStoreLoadOrder) do
+
+        if isGenerated and RecordStores[storeType].data.generatedRecords[recordId] ~= nil then
+            return RecordStores[storeType]
+        elseif RecordStores[storeType].data.permanentRecords[recordId] ~= nil then
+            return RecordStores[storeType]
+        end
     end
 
     return nil
+end
+
+logicHandler.ExchangeGeneratedRecords = function(pid, otherPidsArray)
+    
+    for _, storeType in ipairs(config.recordStoreLoadOrder) do
+        local recordStore = RecordStores[storeType]
+
+        for _, otherPid in pairs(otherPidsArray) do
+            if pid ~= otherPid then
+
+                -- Load the generated records linked to other players
+                if Players[otherPid].data.recordLinks[storeType] ~= nil then
+                    recordStore:LoadGeneratedRecords(pid, recordStore.data.generatedRecords,
+                        Players[otherPid].data.recordLinks[storeType])
+                end
+
+                -- Make the other players load the generated records linked to us too
+                if Players[pid].data.recordLinks[storeType] ~= nil then
+                    recordStore:LoadGeneratedRecords(otherPid, recordStore.data.generatedRecords,
+                        Players[pid].data.recordLinks[storeType])
+                end
+            end
+        end
+    end
 end
 
 logicHandler.GetCellContainingActor = function(actorUniqueIndex)
@@ -533,7 +590,7 @@ logicHandler.SetAIForActor = function(cell, actorUniqueIndex, action, targetPid,
         tes3mp.SendActorAI(true, false)
 
     else
-        tes3mp.LogAppend(3, "Invalid input for logicHandler.SetAIForActor()!")
+        tes3mp.LogAppend(enumerations.log.ERROR, "Invalid input for logicHandler.SetAIForActor()!")
     end
 end
 
@@ -599,7 +656,7 @@ logicHandler.LoadCellForPlayer = function(pid, cellDescription)
     -- Otherwise, only set this new visitor as the authority if their ping is noticeably lower
     -- than that of the current authority
     elseif tes3mp.GetAvgPing(pid) < (tes3mp.GetAvgPing(authPid) - config.pingDifferenceRequiredForAuthority) then
-        tes3mp.LogMessage(2, "Player " .. logicHandler.GetChatName(pid) ..
+        tes3mp.LogMessage(enumerations.log.WARN, "Player " .. logicHandler.GetChatName(pid) ..
             " took over authority from player " .. logicHandler.GetChatName(authPid) ..
             " in " .. cellDescription .. " for latency reasons")
         LoadedCells[cellDescription]:SetAuthority(pid)
@@ -643,7 +700,8 @@ logicHandler.LoadRegionForPlayer = function(pid, regionName, isTeleported)
 
     if regionName == "" then return end
 
-    tes3mp.LogMessage(1, "Loading region " .. regionName .. " for " .. logicHandler.GetChatName(pid))
+    tes3mp.LogMessage(enumerations.log.INFO, "Loading region " .. regionName .. " for " ..
+        logicHandler.GetChatName(pid))
 
     -- Record that this player has the region loaded
     WorldInstance:AddRegionVisitor(pid, regionName)
@@ -665,9 +723,9 @@ logicHandler.LoadRegionForPlayer = function(pid, regionName, isTeleported)
 
         -- Only set this new visitor as the authority if they haven't been teleported here and
         -- their ping is noticeably lower than that of the current authority
-        elseif isTeleported == false and 
+        elseif not isTeleported and 
             tes3mp.GetAvgPing(pid) < (tes3mp.GetAvgPing(authPid) - config.pingDifferenceRequiredForAuthority) then
-            tes3mp.LogMessage(2, "Player " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Player " .. logicHandler.GetChatName(pid) ..
                 " took over authority from player " .. logicHandler.GetChatName(authPid) ..
                 " in region " .. regionName .. " for latency reasons")
             WorldInstance:SetRegionAuthority(pid, regionName)
@@ -681,7 +739,8 @@ logicHandler.UnloadRegionForPlayer = function(pid, regionName)
 
     if WorldInstance.storedRegions[regionName] ~= nil then
 
-        tes3mp.LogMessage(1, "Unloading region " .. regionName .. " for " .. logicHandler.GetChatName(pid))
+        tes3mp.LogMessage(enumerations.log.INFO, "Unloading region " .. regionName .. " for " ..
+            logicHandler.GetChatName(pid))
 
         -- No longer record that this player has the region loaded
         WorldInstance:RemoveRegionVisitor(pid, regionName)

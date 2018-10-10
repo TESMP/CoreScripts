@@ -1,5 +1,15 @@
 packetBuilder = {}
 
+packetBuilder.AddPlayerInventoryItemChange = function(pid, item)
+
+    -- Use default values when necessary
+    if item.charge == nil or item.charge < -1 then item.charge = -1 end
+    if item.enchantmentCharge == nil or item.enchantmentCharge < -1 then item.enchantmentCharge = -1 end
+    if item.soul == nil then item.soul = "" end
+
+    tes3mp.AddItemChange(pid, item.refId, item.count, item.charge, item.enchantmentCharge, item.soul)
+end
+
 packetBuilder.AddObjectDelete = function(uniqueIndex, objectData)
 
     local splitIndex = uniqueIndex:split("-")
@@ -165,6 +175,31 @@ packetBuilder.AddInventoryItemToRecord = function(item)
     if item.count ~= nil then tes3mp.SetRecordInventoryItemCount(item.count) end
 
     tes3mp.AddRecordInventoryItem()
+end
+
+packetBuilder.AddRecordByType = function(id, record, storeType)
+
+    if storeType == "armor" then    
+        packetBuilder.AddArmorRecord(id, record)
+    elseif storeType == "book" then
+        packetBuilder.AddBookRecord(id, record)
+    elseif storeType == "clothing" then
+        packetBuilder.AddClothingRecord(id, record)
+    elseif storeType == "creature" then
+        packetBuilder.AddCreatureRecord(id, record)
+    elseif storeType == "enchantment" then
+        packetBuilder.AddEnchantmentRecord(id, record)
+    elseif storeType == "miscellaneous" then
+        packetBuilder.AddMiscellaneousRecord(id, record)
+    elseif storeType == "npc" then
+        packetBuilder.AddNpcRecord(id, record)
+    elseif storeType == "potion" then
+        packetBuilder.AddPotionRecord(id, record)
+    elseif storeType == "spell" then
+        packetBuilder.AddSpellRecord(id, record)
+    elseif storeType == "weapon" then
+        packetBuilder.AddWeaponRecord(id, record)
+    end
 end
 
 packetBuilder.AddArmorRecord = function(id, record)

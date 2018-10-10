@@ -63,7 +63,7 @@ eventHandler.OnPlayerDisconnect = function(pid)
 
         Players[pid]:SaveCell()
         Players[pid]:SaveStatsDynamic()
-        tes3mp.LogMessage(1, "Saving player " .. logicHandler.GetChatName(pid))
+        tes3mp.LogMessage(enumerations.log.INFO, "Saving player " .. logicHandler.GetChatName(pid))
         Players[pid]:Save()
 
         -- Unload every cell for this player
@@ -132,8 +132,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
         if item ~= nil then
         
             table.insert(Players[pid].data.inventory, item)
-            Players[pid]:LoadInventory()
-            Players[pid]:LoadEquipment()
+            Players[pid]:LoadItemChanges({item}, enumerations.inventory.ADD)
 
             -- If the item is equipped by the target, unequip it first
             if inventoryHelper.containsItem(targetPlayer.data.equipment, item.refId, item.charge) then
@@ -149,8 +148,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                 targetName .. "\n")
 
             if targetPlayer:IsLoggedIn() then
-                targetPlayer:LoadInventory()
-                targetPlayer:LoadEquipment()
+                targetPlayer:LoadItemChanges({item}, enumerations.inventory.REMOVE)
             end
         else
             Players[pid]:Message("Invalid item index\n")
@@ -180,8 +178,7 @@ end
 
 eventHandler.OnPlayerSendMessage = function(pid, message)
 
-    local playerName = tes3mp.GetName(pid)
-    tes3mp.LogMessage(1, logicHandler.GetChatName(pid) .. ": " .. message)
+    tes3mp.LogMessage(enumerations.log.INFO, logicHandler.GetChatName(pid) .. ": " .. message)
 
     if message:sub(1,1) == '/' then
 
@@ -251,7 +248,7 @@ eventHandler.OnPlayerCellChange = function(pid)
 
         if contentFixer.ValidateCellChange(pid) then
 
-            local previousCell = Players[pid].data.location.cell
+            local previousCellDescription = Players[pid].data.location.cell
 
             -- If this player is changing their region, add them to the visitors of the new
             -- region while removing them from the visitors of their old region
@@ -263,12 +260,13 @@ eventHandler.OnPlayerCellChange = function(pid)
                     local debugMessage = logicHandler.GetChatName(pid) .. " has "
                     
                     local hasFinishedInitialTeleportation = Players[pid].hasFinishedInitialTeleportation
-                    local previousCellIsStillLoaded = tableHelper.containsValue(Players[pid].cellsLoaded, previousCell)
+                    local previousCellIsStillLoaded = tableHelper.containsValue(Players[pid].cellsLoaded,
+                        previousCellDescription)
 
                     -- It's possible we've been teleported to a cell we had already loaded when
                     -- spawning on the server, so also check whether this is the player's first
                     -- cell change since joining
-                    local isTeleported = previousCellIsStillLoaded == false or hasFinishedInitialTeleportation == false
+                    local isTeleported = not previousCellIsStillLoaded or not hasFinishedInitialTeleportation
 
                     if isTeleported then
                         debugMessage = debugMessage .. "teleported"
@@ -277,7 +275,7 @@ eventHandler.OnPlayerCellChange = function(pid)
                     end
 
                     debugMessage = debugMessage .. " to region " .. regionName .. "\n"
-                    tes3mp.LogMessage(1, debugMessage)
+                    tes3mp.LogMessage(enumerations.log.INFO, debugMessage)
 
                     logicHandler.LoadRegionForPlayer(pid, regionName, isTeleported)
                 end
@@ -288,13 +286,17 @@ eventHandler.OnPlayerCellChange = function(pid)
                     logicHandler.UnloadRegionForPlayer(pid, previousRegionName)
                 end
 
+                -- Exchange generated records with the other players who have this cell loaded
+                local currentCellDescription = tes3mp.GetCell(pid)
+                logicHandler.ExchangeGeneratedRecords(pid, LoadedCells[currentCellDescription].visitors)
+
                 Players[pid].data.location.regionName = regionName
                 Players[pid].hasFinishedInitialTeleportation = true
             end
 
             Players[pid]:SaveCell()
             Players[pid]:SaveStatsDynamic()
-            tes3mp.LogMessage(1, "Saving player " .. logicHandler.GetChatName(pid))
+            tes3mp.LogMessage(enumerations.log.INFO, "Saving player " .. logicHandler.GetChatName(pid))
             Players[pid]:Save()
 
             if config.shareMapExploration == true then
@@ -457,7 +459,7 @@ end
 eventHandler.OnPlayerItemUse = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local itemRefId = tes3mp.GetUsedItemRefId(pid)
-        tes3mp.LogMessage(1, logicHandler.GetChatName(pid) .. " used inventory item " .. itemRefId)
+        tes3mp.LogMessage(enumerations.log.INFO, logicHandler.GetChatName(pid) .. " used inventory item " .. itemRefId)
 
         -- Unilateral use of items is disabled on clients, so we need to send
         -- this packet back to the player before they can use the item
@@ -481,7 +483,7 @@ eventHandler.OnCellLoad = function(pid, cellDescription)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         logicHandler.LoadCellForPlayer(pid, cellDescription)
     else
-        tes3mp.LogMessage(2, "Undefined behavior: invalid player " .. pid ..
+        tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: invalid player " .. pid ..
             " loaded cell " .. cellDescription)
     end
 end
@@ -501,7 +503,7 @@ eventHandler.OnActorList = function(pid, cellDescription)
         if LoadedCells[cellDescription] ~= nil then
             LoadedCells[cellDescription]:SaveActorList(pid)
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ActorList for unloaded " .. cellDescription)
         end
     else
@@ -514,7 +516,7 @@ eventHandler.OnActorEquipment = function(pid, cellDescription)
         if LoadedCells[cellDescription] ~= nil then
             LoadedCells[cellDescription]:SaveActorEquipment(pid)
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ActorEquipment for unloaded " .. cellDescription)
         end
     else
@@ -535,7 +537,7 @@ eventHandler.OnActorAI = function(pid, cellDescription)
             -- i.e. sendToOtherVisitors is true and skipAttachedPlayer is true
             tes3mp.SendActorAI(true, true)
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ActorAI for unloaded " .. cellDescription)
         end
     else
@@ -547,7 +549,7 @@ eventHandler.OnActorDeath = function(pid, cellDescription)
     if LoadedCells[cellDescription] ~= nil then
         LoadedCells[cellDescription]:SaveActorDeath(pid)
     else
-        tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+        tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
             " sent ActorDeath for unloaded " .. cellDescription)
     end
 end
@@ -557,7 +559,7 @@ eventHandler.OnActorCellChange = function(pid, cellDescription)
         if LoadedCells[cellDescription] ~= nil then
             LoadedCells[cellDescription]:SaveActorCellChanges(pid)
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ActorCellChange for unloaded " .. cellDescription)
         end
     else
@@ -619,7 +621,7 @@ eventHandler.OnObjectActivate = function(pid, cellDescription)
                     debugMessage = debugMessage .. activatingRefId .. " " .. activatingUniqueIndex
                 end
 
-                tes3mp.LogAppend(1, debugMessage)
+                tes3mp.LogAppend(enumerations.log.INFO, debugMessage)
             end
 
             -- Set isValid to false in the loop above if you want to override the default activation
@@ -635,7 +637,7 @@ eventHandler.OnObjectActivate = function(pid, cellDescription)
             end
 
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectActivate for unloaded " .. cellDescription)
         end
     else
@@ -648,10 +650,10 @@ eventHandler.OnObjectPlace = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -684,11 +686,11 @@ eventHandler.OnObjectPlace = function(pid, cellDescription)
                 -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
                 tes3mp.SendObjectPlace(true, false)
             else
-                tes3mp.LogMessage(1, "Rejected ObjectPlace from " .. logicHandler.GetChatName(pid) ..
+                tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectPlace from " .. logicHandler.GetChatName(pid) ..
                     " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
             end
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectPlace for unloaded " .. cellDescription)
         end
     else
@@ -701,10 +703,10 @@ eventHandler.OnObjectSpawn = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -737,11 +739,11 @@ eventHandler.OnObjectSpawn = function(pid, cellDescription)
                 -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
                 tes3mp.SendObjectSpawn(true, false)
             else
-                tes3mp.LogMessage(1, "Rejected ObjectSpawn from " .. logicHandler.GetChatName(pid) ..
+                tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectSpawn from " .. logicHandler.GetChatName(pid) ..
                     " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
             end
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectSpawn for unloaded " .. cellDescription)
         end
     else
@@ -754,10 +756,10 @@ eventHandler.OnObjectDelete = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -794,12 +796,12 @@ eventHandler.OnObjectDelete = function(pid, cellDescription)
                 tes3mp.SendObjectDelete(true, false)
 
             else
-                tes3mp.LogMessage(1, "Rejected ObjectDelete from " .. logicHandler.GetChatName(pid) ..
+                tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectDelete from " .. logicHandler.GetChatName(pid) ..
                     " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
             end
 
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectDelete for unloaded " .. cellDescription)
         end
     else
@@ -812,10 +814,10 @@ eventHandler.OnObjectLock = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -823,8 +825,8 @@ eventHandler.OnObjectLock = function(pid, cellDescription)
 
         local isCellLoaded = LoadedCells[cellDescription] ~= nil
 
-        if isCellLoaded == false and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
-            tes3mp.LogMessage(2, "Invalid ObjectLock: " .. logicHandler.GetChatName(pid) ..
+        if not isCellLoaded and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
+            tes3mp.LogMessage(enumerations.log.WARN, "Invalid ObjectLock: " .. logicHandler.GetChatName(pid) ..
                 " used impossible packetOrigin for unloaded " .. cellDescription)
             return
         end
@@ -848,7 +850,7 @@ eventHandler.OnObjectLock = function(pid, cellDescription)
         if isValid then
             local useTemporaryLoad = false
 
-            if isCellLoaded == false then
+            if not isCellLoaded then
                 logicHandler.LoadCell(cellDescription)
                 useTemporaryLoad = true
             end
@@ -865,11 +867,11 @@ eventHandler.OnObjectLock = function(pid, cellDescription)
             -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
             tes3mp.SendObjectLock(true, false)
         else
-            tes3mp.LogMessage(1, "Rejected ObjectLock from " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectLock from " .. logicHandler.GetChatName(pid) ..
                 " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
         end
     else
-        tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+        tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
             " sent ObjectLock for unloaded " .. cellDescription)
     end
 end
@@ -879,10 +881,10 @@ eventHandler.OnObjectTrap = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -915,12 +917,12 @@ eventHandler.OnObjectTrap = function(pid, cellDescription)
                 -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
                 tes3mp.SendObjectTrap(true, false)
             else
-                tes3mp.LogMessage(1, "Rejected ObjectTrap from " .. logicHandler.GetChatName(pid) ..
+                tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectTrap from " .. logicHandler.GetChatName(pid) ..
                     " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
             end
 
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectTrap for unloaded " .. cellDescription)
         end
     else
@@ -933,10 +935,10 @@ eventHandler.OnObjectScale = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -970,12 +972,12 @@ eventHandler.OnObjectScale = function(pid, cellDescription)
                 -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
                 tes3mp.SendObjectScale(true, false)
             else
-                tes3mp.LogMessage(1, "Rejected ObjectScale from " .. logicHandler.GetChatName(pid) ..
+                tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectScale from " .. logicHandler.GetChatName(pid) ..
                     " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
             end
 
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent ObjectScale for unloaded " .. cellDescription)
         end
     else
@@ -988,10 +990,10 @@ eventHandler.OnObjectState = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -999,8 +1001,8 @@ eventHandler.OnObjectState = function(pid, cellDescription)
 
         local isCellLoaded = LoadedCells[cellDescription] ~= nil
 
-        if isCellLoaded == false and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
-            tes3mp.LogMessage(2, "Invalid ObjectState: " .. logicHandler.GetChatName(pid) ..
+        if not isCellLoaded and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
+            tes3mp.LogMessage(enumerations.log.WARN, "Invalid ObjectState: " .. logicHandler.GetChatName(pid) ..
                 " used impossible packetOrigin for unloaded " .. cellDescription)
             return
         end
@@ -1024,7 +1026,7 @@ eventHandler.OnObjectState = function(pid, cellDescription)
         if isValid then
             local useTemporaryLoad = false
 
-            if isCellLoaded == false then
+            if not isCellLoaded then
                 logicHandler.LoadCell(cellDescription)
                 useTemporaryLoad = true
             end
@@ -1041,7 +1043,7 @@ eventHandler.OnObjectState = function(pid, cellDescription)
             -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
             tes3mp.SendObjectState(true, false)
         else
-            tes3mp.LogMessage(1, "Rejected ObjectState from " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.INFO, "Rejected ObjectState from " .. logicHandler.GetChatName(pid) ..
                 " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
         end
     else
@@ -1054,7 +1056,7 @@ eventHandler.OnDoorState = function(pid, cellDescription)
         if LoadedCells[cellDescription] ~= nil then
             LoadedCells[cellDescription]:SaveDoorStates(pid)
         else
-            tes3mp.LogMessage(2, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
+            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
                 " sent DoorState for unloaded " .. cellDescription)
         end
     else
@@ -1067,10 +1069,10 @@ eventHandler.OnContainer = function(pid, cellDescription)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
@@ -1078,8 +1080,8 @@ eventHandler.OnContainer = function(pid, cellDescription)
 
         local isCellLoaded = LoadedCells[cellDescription] ~= nil
 
-        if isCellLoaded == false and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
-            tes3mp.LogMessage(2, "Invalid Container: " .. logicHandler.GetChatName(pid) ..
+        if not isCellLoaded and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
+            tes3mp.LogMessage(enumerations.log.WARN, "Invalid Container: " .. logicHandler.GetChatName(pid) ..
                 " used impossible packetOrigin for unloaded " .. cellDescription)
             return
         end
@@ -1105,7 +1107,8 @@ eventHandler.OnContainer = function(pid, cellDescription)
                 
                 if subAction == enumerations.containerSub.REPLY_TO_REQUEST then
                     tableHelper.removeValue(unusableContainerUniqueIndexes, uniqueIndex)
-                    tes3mp.LogMessage(1, "Making container " .. uniqueIndex .. " usable as a result of request reply")
+                    tes3mp.LogMessage(enumerations.log.INFO, "Making container " .. uniqueIndex ..
+                        " usable as a result of request reply")
                 else
                     table.insert(rejectedObjects, refId .. " " .. uniqueIndex)
                     isValid = false
@@ -1118,7 +1121,7 @@ eventHandler.OnContainer = function(pid, cellDescription)
         if isValid then
             local useTemporaryLoad = false
 
-            if isCellLoaded == false then
+            if not isCellLoaded then
                 logicHandler.LoadCell(cellDescription)
                 useTemporaryLoad = true
             end
@@ -1131,8 +1134,8 @@ eventHandler.OnContainer = function(pid, cellDescription)
                 logicHandler.UnloadCell(cellDescription)
             end
         else
-            tes3mp.LogMessage(1, "Rejected Container from " .. logicHandler.GetChatName(pid) .." about " ..
-                tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
+            tes3mp.LogMessage(enumerations.log.INFO, "Rejected Container from " .. logicHandler.GetChatName(pid) ..
+                " about " .. tableHelper.concatenateArrayValues(rejectedObjects, 1, ", "))
         end
     else
         tes3mp.Kick(pid)
@@ -1144,21 +1147,21 @@ eventHandler.OnVideoPlay = function(pid)
 
         tes3mp.ReadReceivedObjectList()
         local packetOrigin = tes3mp.GetObjectListOrigin()
-        tes3mp.LogAppend(1, "- packetOrigin was " ..
+        tes3mp.LogAppend(enumerations.log.INFO, "- packetOrigin was " ..
             tableHelper.getIndexByPattern(enumerations.packetOrigin, packetOrigin))
 
-        if logicHandler.IsPacketFromConsole(packetOrigin) and logicHandler.IsPlayerAllowedConsole(pid) == false then
+        if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
             tes3mp.Kick(pid)
             tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
             return
         end
 
         if config.shareVideos == true then
-            tes3mp.LogMessage(2, "Sharing VideoPlay from " .. logicHandler.GetChatName(pid))
+            tes3mp.LogMessage(enumerations.log.WARN, "Sharing VideoPlay from " .. logicHandler.GetChatName(pid))
 
             for i = 0, tes3mp.GetObjectListSize() - 1 do
                 local videoFilename = tes3mp.GetVideoFilename(i)
-                tes3mp.LogAppend(2, "- videoFilename " .. videoFilename)
+                tes3mp.LogAppend(enumerations.log.WARN, "- videoFilename " .. videoFilename)
             end
 
             tes3mp.CopyReceivedObjectListToStore()
@@ -1174,20 +1177,20 @@ eventHandler.OnRecordDynamic = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         tes3mp.ReadReceivedWorldstate()
         
-        local recordType = tes3mp.GetRecordType(pid)
+        local recordNumericalType = tes3mp.GetRecordType(pid)
 
         -- Iterate through the records in the RecordDynamic packet and only sync and save them
         -- if all their names are allowed
         local isValid = true
         local rejectedRecords = {}
 
-        if recordType ~= enumerations.recordType.ENCHANTMENT then
+        if recordNumericalType ~= enumerations.recordType.ENCHANTMENT then
             local recordCount = tes3mp.GetRecordCount(pid)
 
             for recordIndex = 0, recordCount - 1 do
                 local recordName = tes3mp.GetRecordName(recordIndex)
 
-                if logicHandler.IsNameAllowed(recordName) == false then
+                if not logicHandler.IsNameAllowed(recordName) then
                     table.insert(rejectedRecords, recordName)
                     isValid = false
 
@@ -1196,26 +1199,32 @@ eventHandler.OnRecordDynamic = function(pid)
             end
         end
 
-        if isValid == false then
-            tes3mp.LogMessage(1, "Rejected RecordDynamic from " .. logicHandler.GetChatName(pid) .." about " ..
-                tableHelper.concatenateArrayValues(rejectedRecords, 1, ", "))
+        if not isValid then
+            tes3mp.LogMessage(enumerations.log.INFO, "Rejected RecordDynamic from " .. logicHandler.GetChatName(pid) ..
+                " about " .. tableHelper.concatenateArrayValues(rejectedRecords, 1, ", "))
             return
         end
 
-        local recordStore = logicHandler.GetRecordStore(recordType)
-        local recordAdditions
+        local storeType = string.lower(tableHelper.getIndexByPattern(enumerations.recordType, recordNumericalType))
+        local recordStore = RecordStores[storeType]
+        local isEnchantable, recordAdditions
 
-        local enchantableRecordTypes = { enumerations.recordType.ARMOR, enumerations.recordType.BOOK,
-            enumerations.recordType.CLOTHING, enumerations.recordType.WEAPON }
+        if recordStore == nil then
+            tes3mp.LogMessage(enumerations.log.WARN, "Rejected RecordDynamic for invalid record store of type " ..
+                recordNumericalType)
+            return
+        else
+            isEnchantable = tableHelper.containsValue(config.enchantableRecordTypes, storeType)
+        end
 
-        if recordType == enumerations.recordType.SPELL then
-            recordAdditions = recordStore:SaveSpells(pid)
-        elseif recordType == enumerations.recordType.POTION then
-            recordAdditions = recordStore:SavePotions(pid)
-        elseif recordType == enumerations.recordType.ENCHANTMENT then
-            recordAdditions = recordStore:SaveEnchantments(pid)
-        elseif tableHelper.containsValue(enchantableRecordTypes, recordType) then
-            recordAdditions = recordStore:SaveEnchantedItems(pid)
+        if storeType == "spell" then
+            recordAdditions = recordStore:SaveGeneratedSpells(pid)
+        elseif storeType == "potion" then
+            recordAdditions = recordStore:SaveGeneratedPotions(pid)
+        elseif storeType == "enchantment" then
+            recordAdditions = recordStore:SaveGeneratedEnchantments(pid)
+        elseif isEnchantable then
+            recordAdditions = recordStore:SaveGeneratedEnchantedItems(pid)
         end
 
         tes3mp.CopyReceivedWorldstateToStore()
@@ -1227,15 +1236,21 @@ eventHandler.OnRecordDynamic = function(pid)
             -- RecordsDynamic packet before we send it to the players
             tes3mp.SetRecordIdByIndex(recordAddition.index, recordAddition.id)
 
-            if recordType == enumerations.recordType.ENCHANTMENT then
+            if storeType == "enchantment" then
                 -- We need to store this enchantment's original client-generated id
                 -- on this player so we can match it with its server-generated correct
                 -- id once the player sends the record of the enchanted item they've
                 -- used it on
                 Players[pid].unresolvedEnchantments[recordAddition.clientsideId] = recordAddition.id
-            elseif tableHelper.containsValue(enchantableRecordTypes, recordType) then
+            elseif isEnchantable then
                 -- Set the server-generated id for this enchanted item's enchantment
                 tes3mp.SetRecordEnchantmentIdByIndex(recordAddition.index, recordAddition.enchantmentId)
+            end
+
+            -- This record will be sent to everyone on the server just after this loop,
+            -- so track it as having already been received by players
+            for _, player in pairs(Players) do
+                table.insert(player.generatedRecordsReceived, recordAddition.id)
             end
         end
 
@@ -1244,30 +1259,51 @@ eventHandler.OnRecordDynamic = function(pid)
         tes3mp.SendRecordDynamic(pid, true, false)
     
         -- Add the final spell to the player's spellbook
-        if recordType == enumerations.recordType.SPELL then
+        if storeType == "spell" then
 
-            tes3mp.InitializeSpellbookChanges(pid)
+            tes3mp.ClearSpellbookChanges(pid)
             tes3mp.SetSpellbookChangesAction(pid, enumerations.spellbook.ADD)
             
             for _, recordAddition in pairs(recordAdditions) do
-                table.insert(Players[pid].data.spellbook, { spellId = recordAddition.id })
+                table.insert(Players[pid].data.spellbook, recordAddition.id)
                 tes3mp.AddSpell(pid, recordAddition.id)
+
+                Players[pid]:AddLinkToRecord(storeType, recordAddition.id)
             end
 
+            recordStore:Save()
             Players[pid]:Save()
             tes3mp.SendSpellbookChanges(pid)
 
         -- Add the final items to the player's inventory
-        elseif recordType == enumerations.recordType.POTION or
-            tableHelper.containsValue(enchantableRecordTypes, recordType) then
+        elseif storeType == "potion" or isEnchantable then
+
+            local enchantmentStore
+
+            if isEnchantable then enchantmentStore = RecordStores["enchantment"] end
+
+            local itemArray = {}
             
             for _, recordAddition in pairs(recordAdditions) do
                 local item = { refId = recordAddition.id, count = 1, charge = -1, enchantmentCharge = -1 }
                 table.insert(Players[pid].data.inventory, item)
+                table.insert(itemArray, item)
+
+                Players[pid]:AddLinkToRecord(storeType, recordAddition.id)
+
+                -- If this is an enchantable item record, add a link to it from its associated
+                -- enchantment record
+                if isEnchantable then
+                    enchantmentStore:AddLinkToRecord(recordAddition.enchantmentId,
+                        recordAddition.id, storeType)
+                end
             end
 
-            Players[pid]:LoadInventory()
-            Players[pid]:LoadEquipment()
+            if isEnchantable then enchantmentStore:Save() end
+
+            recordStore:Save()
+            Players[pid]:Save()
+            Players[pid]:LoadItemChanges(itemArray, enumerations.inventory.ADD)
         end
     end
 end

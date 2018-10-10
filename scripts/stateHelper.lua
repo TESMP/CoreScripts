@@ -7,7 +7,7 @@ function StateHelper:LoadJournal(pid, stateObject)
         stateObject.data.journal = {}
     end
 
-    tes3mp.InitializeJournalChanges(pid)
+    tes3mp.ClearJournalChanges(pid)
 
     for index, journalItem in pairs(stateObject.data.journal) do
 
@@ -37,7 +37,7 @@ function StateHelper:LoadFactionRanks(pid, stateObject)
         stateObject.data.factionRanks = {}
     end
 
-    tes3mp.InitializeFactionChanges(pid)
+    tes3mp.ClearFactionChanges(pid)
     tes3mp.SetFactionChangesAction(pid, enumerations.faction.RANK)
 
     for factionId, rank in pairs(stateObject.data.factionRanks) do
@@ -56,7 +56,7 @@ function StateHelper:LoadFactionExpulsion(pid, stateObject)
         stateObject.data.factionExpulsion = {}
     end
 
-    tes3mp.InitializeFactionChanges(pid)
+    tes3mp.ClearFactionChanges(pid)
     tes3mp.SetFactionChangesAction(pid, enumerations.faction.EXPULSION)
 
     for factionId, state in pairs(stateObject.data.factionExpulsion) do
@@ -75,7 +75,7 @@ function StateHelper:LoadFactionReputation(pid, stateObject)
         stateObject.data.factionReputation = {}
     end
 
-    tes3mp.InitializeFactionChanges(pid)
+    tes3mp.ClearFactionChanges(pid)
     tes3mp.SetFactionChangesAction(pid, enumerations.faction.REPUTATION)
 
     for factionId, reputation in pairs(stateObject.data.factionReputation) do
@@ -94,7 +94,7 @@ function StateHelper:LoadTopics(pid, stateObject)
         stateObject.data.topics = {}
     end
 
-    tes3mp.InitializeTopicChanges(pid)
+    tes3mp.ClearTopicChanges(pid)
 
     for index, topicId in pairs(stateObject.data.topics) do
 
@@ -250,7 +250,7 @@ function StateHelper:SaveTopics(pid, stateObject)
 
         local topicId = tes3mp.GetTopicId(pid, i)
 
-        if tableHelper.containsValue(stateObject.data.topics, topicId) == false then
+        if not tableHelper.containsValue(stateObject.data.topics, topicId) then
             table.insert(stateObject.data.topics, topicId)
         end
     end
@@ -285,7 +285,7 @@ function StateHelper:SaveMapExploration(pid, stateObject)
     local cell = tes3mp.GetCell(pid)
 
     if tes3mp.IsInExterior(pid) == true then
-        if tableHelper.containsValue(stateObject.data.mapExplored, cell) == false then
+        if not tableHelper.containsValue(stateObject.data.mapExplored, cell) then
             table.insert(stateObject.data.mapExplored, cell)
         end
     end
